@@ -94,6 +94,16 @@ button{font:inherit;cursor:pointer;color:var(--ink)}
 .kpi .s{font-size:.8rem;color:var(--muted)}
 .kpi.hi{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .kpi.hi .k,.kpi.hi .s{color:var(--bg);opacity:.75}
+.settle{border-left:4px solid var(--accent)}
+.s-rows{display:flex;flex-direction:column;gap:4px}
+.s-row{display:flex;justify-content:space-between;gap:12px;font-size:.98rem}
+.s-row span:last-child{font-family:var(--f-num);font-variant-numeric:tabular-nums;text-align:right}
+.s-row.sub{color:var(--muted);font-size:.88rem}
+.s-row.line{border-top:1px solid var(--line);padding-top:6px;margin-top:4px}
+.s-total{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-top:2px solid var(--ink);margin-top:8px;padding-top:8px;font-family:var(--f-display);font-weight:700;font-size:1.4rem}
+.s-total span:last-child{font-family:var(--f-num);font-weight:500;font-size:1.5rem}
+.s-total.owe span:last-child{color:var(--bad)}
+.s-total.get span:last-child{color:var(--good)}
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
 .tbl{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.92rem}

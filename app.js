@@ -389,6 +389,11 @@ function weekStats(){
       p.qty += num(it.qty); p.cost += num(it.qty) * num(it.cost);
     });
   });
+  const held = m => st.pays[m] || {n:0, amt:0, tip:0};
+  st.cash = held('cash'); st.zelle = held('zelle');
+  st.held = st.cash.amt + st.zelle.amt;
+  st.owed = st.pay + st.tips;
+  st.net = r2(st.owed - st.held);
   st.closeRate = (st.closed + st.notClosed) ? Math.round(100 * st.closed / (st.closed + st.notClosed)) : null;
   st.avgTicket = st.closed ? st.closedRevenue / st.closed : 0;
   return st;
@@ -407,6 +412,19 @@ function renderWeek(){
     k('Profit', money0(st.profit), 'sales − parts cost') +
     k('My pay + tips', money(st.pay + st.tips), `${money0(st.pay)} pay · ${money0(st.tips)} tips`, true) +
     k('Card fees', money0(st.cardFees), `not paid yet: ${money0((st.pays.unpaid||{amt:0}).amt)}`);
+  const sr = (a, b, cls = '') => `<div class="s-row ${cls}"><span>${esc(a)}</span><span>${esc(b)}</span></div>`;
+  const jobsWord = n => n + (n === 1 ? ' job' : ' jobs');
+  $('#settle').innerHTML = `<div class="s-rows">
+      ${sr(`Cash I collected (${jobsWord(st.cash.n)})`, money(st.cash.amt))}
+      ${sr(`Zelle to me (${jobsWord(st.zelle.n)})`, money(st.zelle.amt))}
+      ${sr('Money already in my hands', money(st.held), 'line')}
+      ${sr('My pay this week', money(st.pay), 'line')}
+      ${sr('All my tips', money(st.tips))}
+      ${sr('What I earned (pay + tips)', money(st.owed), 'line')}
+    </div>
+    <div class="s-total ${st.net >= 0 ? 'get' : 'owe'}"><span>${st.net >= 0 ? 'Company owes me' : 'I owe the company'}</span><span>${money(Math.abs(st.net))}</span></div>
+    <p class="hint">Earned minus the cash and Zelle I already have. Cash and Zelle amounts include any tips paid that way.</p>`;
+
   const payRows = PAYMENTS.filter(([v]) => st.pays[v]).map(([v,l]) => `<tr><td>${esc(l)}</td><td class="num">${st.pays[v].n}</td><td class="num">${money(st.pays[v].amt)}</td><td class="num">${money(st.pays[v].tip)}</td></tr>`).join('');
   $('#payTbl').innerHTML = payRows ? `<table><thead><tr><th>Method</th><th class="num">Jobs</th><th class="num">Charged</th><th class="num">Tips</th></tr></thead><tbody>${payRows}</tbody></table>` : '<p class="empty">No payments logged this week.</p>';
   const ps = Object.entries(st.parts).sort((a,b) => b[1].qty - a[1].qty);
@@ -438,6 +456,13 @@ function reportText(){
   L.push(`Avg closed job: ${money(st.avgTicket)} | Card fees: ${money(st.cardFees)}`);
   L.push(`My pay: ${money(st.pay)} | Tips: ${money(st.tips)}`);
   L.push(`Reviews: ${st.reviewsGot} received (${st.reviewsAsked} asked)`);
+  L.push('');
+  L.push('Settle up:');
+  L.push(`Cash collected: ${st.cash.n} jobs, ${money(st.cash.amt)}`);
+  L.push(`Zelle to me: ${st.zelle.n} jobs, ${money(st.zelle.amt)}`);
+  L.push(`In my hands: ${money(st.held)} | Earned (pay + tips): ${money(st.owed)}`);
+  L.push(st.net >= 0 ? `Company owes me: ${money(st.net)}` : `I owe the company: ${money(-st.net)}`);
+  L.push('');
   const pays = PAYMENTS.filter(([v]) => st.pays[v]).map(([v,l]) => `${l} ${st.pays[v].n} (${money(st.pays[v].amt)})`);
   L.push(`Payments: ${pays.length ? pays.join(' | ') : 'none'}`);
   const ps = Object.entries(st.parts).sort((a,b) => b[1].qty - a[1].qty).map(([n,p]) => `${p.qty}x ${n}`);

@@ -531,8 +531,7 @@ function reportText(){
   L.push(`Return cx(call back):${st.callbacks}`);
   L.push('');
   L.push(`Review:${st.reviewsGot}`);
-  return L.join('
-');
+  return L.join('\n');
 }
 $('#copyBtn').addEventListener('click', () => copyText(reportText(), $('#reportText'), 'Report copied. Paste it into a text or email.'));
 $('#csvBtn').addEventListener('click', () => {

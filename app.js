@@ -187,13 +187,14 @@ function calc(d, p){
   const tip = num(d.tip);
   const items = d.items || [];
   const partsCost = d.status === 'not_closed' ? 0 : items.reduce((a,it) => a + num(it.qty) * num(it.cost), 0);
-  const cardFee = hasFee(d.payment) ? (price + tip) * num(p.cardFeePct) / 100 : 0;
+  // card fee is only on the job price; the tip goes on top with no fee
+  const cardFee = hasFee(d.payment) ? price * num(p.cardFeePct) / 100 : 0;
   const total = price + tip + cardFee;
   const profit = price - partsCost;
   const base = p.commissionBase === 'revenue' ? price : profit;
   const commission = Math.max(0, base) * num(p.commissionPct) / 100;
-  // company pays back: parts the tech bought + the card fee on the job price (not the fee on the tip)
-  const feeBack = hasFee(d.payment) ? price * num(p.cardFeePct) / 100 : 0;
+  // company pays back: parts the tech bought + the card fee
+  const feeBack = cardFee;
   const earned = commission + partsCost + feeBack + tip;
   return {price:r2(price), partsCost:r2(partsCost), cardFee:r2(cardFee), total:r2(total), tip:r2(tip), profit:r2(profit),
           commission:r2(commission), feeBack:r2(feeBack), earned:r2(earned)};
@@ -294,8 +295,8 @@ function renderTotals(){
   if (!draft) return;
   const c = calc(draft, prefs);
   let html = `<div class="t-row"><span>${draft.status === 'not_closed' ? 'Charged (service call)' : 'Job price'}</span><span>${money(c.price)}</span></div>`;
+  if (hasFee(draft.payment)) html += `<div class="t-row"><span>Card fee (${num(prefs.cardFeePct)}%)</span><span>${money(c.cardFee)}</span></div>`;
   if (c.tip) html += `<div class="t-row"><span>Tip</span><span>${money(c.tip)}</span></div>`;
-  if (hasFee(draft.payment)) html += `<div class="t-row"><span>Card fee (${num(prefs.cardFeePct)}%${c.tip ? ' on price + tip' : ''})</span><span>${money(c.cardFee)}</span></div>`;
   html += `<div class="t-row t-big"><span>Total to charge</span><span>${money(c.total)}</span></div>`;
   $('#totals').innerHTML = html;
   $('#mine').hidden = !showMine;
@@ -326,8 +327,8 @@ function invoiceText(){
   if (items.length){ L.push(''); L.push('Parts included:'); items.forEach(it => L.push(`- ${num(it.qty) > 1 ? num(it.qty) + ' x ' : ''}${it.name}`)); }
   L.push(''); L.push(`Warranty: ${draft.warranty || 'None'}`); L.push('');
   L.push(`Price: ${money(c.price)}`);
-  if (c.tip) L.push(`Tip: ${money(c.tip)}`);
   if (hasFee(draft.payment)) L.push(`Card processing fee (${num(prefs.cardFeePct)}%): ${money(c.cardFee)}`);
+  if (c.tip) L.push(`Tip: ${money(c.tip)}`);
   L.push(`Total: ${money(c.total)}`);
   if (draft.payment && draft.payment !== 'unpaid') L.push(`Paid by: ${label(PAYMENTS, draft.payment)}`);
   return L.join('\n');
@@ -434,7 +435,7 @@ function renderWeek(){
       ${sr('What I earned', money(st.owed), 'line')}
     </div>
     <div class="s-total ${st.net >= 0 ? 'get' : 'owe'}"><span>${st.net >= 0 ? 'Company owes me' : 'I owe the company'}</span><span>${money(Math.abs(st.net))}</span></div>
-    <p class="hint">What I earned minus the cash and Zelle I already have. Cash and Zelle amounts include tips paid that way. The card fee on tips stays with the company.</p>`;
+    <p class="hint">What I earned minus the cash and Zelle I already have. Cash and Zelle amounts include tips paid that way.</p>`;
 
   const payRows = PAYMENTS.filter(([v]) => st.pays[v]).map(([v,l]) => `<tr><td>${esc(l)}</td><td class="num">${st.pays[v].n}</td><td class="num">${money(st.pays[v].amt)}</td><td class="num">${money(st.pays[v].tip)}</td></tr>`).join('');
   $('#payTbl').innerHTML = payRows ? `<table><thead><tr><th>Method</th><th class="num">Jobs</th><th class="num">Charged</th><th class="num">Tips</th></tr></thead><tbody>${payRows}</tbody></table>` : '<p class="empty">No payments logged this week.</p>';

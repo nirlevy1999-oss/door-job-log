@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Door Job Log</title>
+<meta name="theme-color" content="#15202B">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Door Jobs">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brand"><i aria-hidden="true"></i>DOOR JOB LOG</div>
+  <div id="status" class="status" data-s="connecting">Starting…</div>
+</div></header>
+<div id="banner" class="banner" hidden><div class="wrap" id="bannerText"></div></div>
+
+<!-- SIGN-IN / ACCESS SCREENS -->
+<main id="gate" class="wrap gate">
+  <section class="ticket">
+    <h1 id="gateTitle">Sign in</h1>
+    <p id="gateText" class="lead">Log your jobs on the spot and get your weekly report.</p>
+    <button id="googleBtn" class="primary" type="button" hidden>Sign in with Google</button>
+    <button id="claimBtn" class="primary" type="button" hidden>Set me up as the owner</button>
+    <button id="gateSignOut" class="link" type="button" hidden>Use a different Google account</button>
+  </section>
+</main>
+
+<main id="app" class="wrap" hidden>
+  <!-- NEW / EDIT JOB (safe to show the customer: no part costs here) -->
+  <section id="view-new" class="ticket" aria-labelledby="formTitle">
+    <div class="row-h">
+      <h1 id="formTitle">New job</h1>
+      <button id="clearBtn" class="link" type="button">Start over</button>
+    </div>
+    <div class="grid3">
+      <label for="fDate">Date<input type="date" id="fDate"></label>
+      <label for="fJobNo">Job #<input id="fJobNo" placeholder="From company app" autocomplete="off"></label>
+      <label for="fCust">Customer / area<input id="fCust" placeholder="Optional" autocomplete="off"></label>
+    </div>
+    <fieldset><legend>Outcome</legend><div class="seg" id="fStatus"></div></fieldset>
+
+    <div class="row-h">
+      <h2>Parts used</h2>
+      <input id="partSearch" placeholder="Search: 225, cable, roller…" class="search" autocomplete="off">
+    </div>
+    <div id="partPicker" class="picker"></div>
+    <div id="lines" class="lines"></div>
+    <button id="addCustom" class="ghost" type="button">+ Part not on the list</button>
+
+    <div class="grid2">
+      <label for="fPrice" class="price-in">Job price $<input id="fPrice" inputmode="decimal" placeholder="0"></label>
+      <label for="fWarranty">Warranty<select id="fWarranty"></select></label>
+    </div>
+
+    <fieldset><legend>How did they pay?</legend><div class="seg" id="fPayment"></div></fieldset>
+    <label for="fTip">Tip $<input id="fTip" inputmode="decimal" placeholder="0"></label>
+
+    <div id="totals" class="totals"></div>
+    <div class="row-h"><span class="hint">Your costs stay hidden on this screen.</span><button id="mineBtn" class="link" type="button">Show my numbers</button></div>
+    <div id="mine" class="mine" hidden></div>
+
+    <fieldset><legend>Review</legend><div class="seg" id="fReview"></div></fieldset>
+    <label for="fNotes">Notes (just for you)<textarea id="fNotes" placeholder="Problem found, work done, follow-up"></textarea></label>
+    <fieldset><legend>Photos</legend>
+      <div id="photoGrid" class="photos"></div>
+      <label for="fPhotos" class="ghost photo-add">+ Add photos (camera or gallery)<input type="file" id="fPhotos" accept="image/*" multiple hidden></label>
+    </fieldset>
+    <button id="saveBtn" class="primary" type="button">Save job</button>
+    <button id="invoiceBtn" class="sec" type="button">Copy invoice text for customer</button>
+    <pre id="invoiceText" class="report" hidden></pre>
+    <button id="deleteBtn" class="danger" type="button" hidden>Delete job</button>
+  </section>
+
+  <!-- WEEKLY REPORT -->
+  <section id="view-week" class="stack" hidden>
+    <div class="weeknav">
+      <button id="prevWk" type="button" aria-label="Previous week">‹</button>
+      <div class="center"><h2 class="small">Weekly report</h2><h1 id="wkLabel"></h1></div>
+      <button id="nextWk" type="button" aria-label="Next week">›</button>
+    </div>
+    <div id="kpis" class="kpis"></div>
+    <div class="two">
+      <div class="panel"><h2>How customers paid</h2><div class="tbl" id="payTbl"></div></div>
+      <div class="panel"><h2>Parts used</h2><div class="tbl" id="partsTbl"></div></div>
+    </div>
+    <div class="panel"><div class="row-h"><h2>Jobs</h2><span class="hint">Tap a job to edit it</span></div><div id="jobList"></div></div>
+    <div class="btnrow">
+      <button id="copyBtn" class="primary" type="button">Copy report</button>
+      <button id="csvBtn" class="sec fixed" type="button">Download CSV</button>
+    </div>
+    <pre id="reportText" class="report" hidden></pre>
+  </section>
+
+  <!-- PARTS + PAY + TEAM -->
+  <section id="view-parts" class="stack" hidden>
+    <div class="panel">
+      <h1>My pay</h1>
+      <div class="grid2">
+        <label for="sPct">My commission %<input id="sPct" inputmode="decimal"></label>
+        <label for="sBase">Commission is on<select id="sBase"><option value="profit">Job price minus parts</option><option value="revenue">Full job price</option></select></label>
+        <label for="sCard">Card fee %<input id="sCard" inputmode="decimal"></label>
+        <label for="sWeek">Week starts<select id="sWeek"><option value="1">Monday</option><option value="0">Sunday</option></select></label>
+      </div>
+      <p class="hint">Profit = job price minus parts cost. Card fee and tips are left out of profit. With card, the fee is added on the job price and the tip. Your pay is saved with each job, so changing the % later won't change past weeks.</p>
+      <button id="savePay" class="primary" type="button">Save my pay settings</button>
+    </div>
+
+    <div class="panel" id="teamPanel" hidden>
+      <h1>Team</h1>
+      <p class="hint">Only these Google accounts can open the app. Each person sees only their own jobs. Everyone uses your parts list, and only you can change it.</p>
+      <div id="teamList" class="team"></div>
+      <div class="add-row">
+        <input id="teamEmail" type="email" placeholder="their.gmail@gmail.com" autocomplete="off">
+        <button id="teamAdd" class="sec" type="button">Add</button>
+      </div>
+      <p class="hint">Send them the app link after you add them.</p>
+    </div>
+
+    <div class="panel">
+      <div class="row-h"><h1>Parts costs</h1><span class="hint" id="partCount"></span></div>
+      <p class="hint" id="partsNote"></p>
+      <input id="partsSearch" placeholder="Search parts" autocomplete="off">
+      <div id="partsEditor" class="stack6"></div>
+      <button id="addPart" class="ghost" type="button" hidden>+ Add part</button>
+      <button id="saveParts" class="primary" type="button" hidden>Save parts list</button>
+      <details id="importBox" hidden>
+        <summary>Import a list (paste)</summary>
+        <p class="hint">One part per line: <code>Group | Part name | Cost</code>. Parts with the same name get their cost updated, new ones are added.</p>
+        <textarea id="importText" rows="8" placeholder="Torsion springs | Spring 225 | 46"></textarea>
+        <button id="importBtn" class="sec" type="button">Import</button>
+      </details>
+    </div>
+
+    <div class="panel">
+      <p class="hint" id="whoami"></p>
+      <button id="signOutBtn" class="sec" type="button">Sign out</button>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs" id="tabs" aria-label="Sections" hidden><div class="in">
+  <a href="#new" data-v="new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New job</a>
+  <a href="#week" data-v="week"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Week</a>
+  <a href="#parts" data-v="parts"><svg viewBox="0 0 24 24"><path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>Parts &amp; pay</a>
+</div></nav>
+<div id="toast" class="toast" hidden role="status"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

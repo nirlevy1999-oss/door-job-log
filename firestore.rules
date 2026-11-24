@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function accessPath() { return /databases/$(database)/documents/config/access; }
+    function hasAccessDoc() { return exists(accessPath()); }
+    function isOwner() { return signedIn() && hasAccessDoc() && get(accessPath()).data.ownerUid == request.auth.uid; }
+    function isMember() {
+      return signedIn() && hasAccessDoc() && (
+        isOwner() ||
+        (request.auth.token.email_verified == true &&
+         request.auth.token.email.lower() in get(accessPath()).data.members)
+      );
+    }
+
+    // Who owns the app + team email list.
+    match /config/access {
+      allow read: if signedIn() && (!hasAccessDoc() || isMember());
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.members is list;
+      allow update: if isOwner() && request.resource.data.ownerUid == resource.data.ownerUid
+                    && request.resource.data.members is list;
+      allow delete: if false;
+    }
+
+    // Shared parts cost list: team reads, owner writes.
+    match /config/parts {
+      allow read: if isMember();
+      allow write: if isOwner();
+    }
+
+    // Each person's own profile, jobs and photos: only that person.
+    match /users/{uid}/{document=**} {
+      allow read, write: if isMember() && request.auth.uid == uid;
+    }
+  }
+}

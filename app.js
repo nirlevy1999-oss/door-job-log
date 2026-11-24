@@ -28,7 +28,7 @@ const WARRANTIES = ['6 months','1 year'].concat(Array.from({length:24}, (_,i) =>
 $('#fWarranty').innerHTML = '<option value="">No warranty</option>' + WARRANTIES.map(w => `<option>${w}</option>`).join('');
 
 /* ---------- state ---------- */
-const PREF_DEFAULTS = {commissionPct:0, commissionBase:'profit', cardFeePct:4, weekStart:1};
+const PREF_DEFAULTS = {commissionPct:30, commissionBase:'profit', cardFeePct:4, weekStart:1};
 let prefs = {...PREF_DEFAULTS};
 let parts = [], partsLoaded = false;
 let jobs = [], jobsPending = false;
@@ -192,7 +192,11 @@ function calc(d, p){
   const profit = price - partsCost;
   const base = p.commissionBase === 'revenue' ? price : profit;
   const commission = Math.max(0, base) * num(p.commissionPct) / 100;
-  return {price:r2(price), partsCost:r2(partsCost), cardFee:r2(cardFee), total:r2(total), tip:r2(tip), profit:r2(profit), commission:r2(commission)};
+  // company pays back: parts the tech bought + the card fee on the job price (not the fee on the tip)
+  const feeBack = hasFee(d.payment) ? price * num(p.cardFeePct) / 100 : 0;
+  const earned = commission + partsCost + feeBack + tip;
+  return {price:r2(price), partsCost:r2(partsCost), cardFee:r2(cardFee), total:r2(total), tip:r2(tip), profit:r2(profit),
+          commission:r2(commission), feeBack:r2(feeBack), earned:r2(earned)};
 }
 
 /* ---------- routing ---------- */
@@ -298,9 +302,12 @@ function renderTotals(){
   $('#mineBtn').textContent = showMine ? 'Hide my numbers' : 'Show my numbers';
   if (showMine){
     const missing = draft.items.filter(it => !num(it.cost) && String(it.name).trim()).length;
-    $('#mine').innerHTML = `<div class="t-row"><span>Parts cost</span><span>${money(c.partsCost)}</span></div>
-      <div class="t-row"><span>Profit</span><span>${money(c.profit)}</span></div>
-      <div class="t-row"><span>My pay (${num(prefs.commissionPct)}%)${c.tip ? ' + tip' : ''}</span><span>${money(c.commission + c.tip)}</span></div>
+    $('#mine').innerHTML = `<div class="t-row"><span>Job minus parts</span><span>${money(c.profit)}</span></div>
+      <div class="t-row"><span>My ${num(prefs.commissionPct)}%</span><span>${money(c.commission)}</span></div>
+      <div class="t-row"><span>Parts paid back</span><span>${money(c.partsCost)}</span></div>
+      ${c.feeBack ? `<div class="t-row"><span>Card fee paid back</span><span>${money(c.feeBack)}</span></div>` : ''}
+      ${c.tip ? `<div class="t-row"><span>Tip</span><span>${money(c.tip)}</span></div>` : ''}
+      <div class="t-row"><span><b>I get from this job</b></span><span><b>${money(c.earned)}</b></span></div>
       ${missing ? `<div>${missing} part(s) have no cost, so profit may be high.</div>` : ''}`;
   }
 }
@@ -340,6 +347,7 @@ $('#saveBtn').addEventListener('click', () => {
   const data = {date:draft.date || ymd(new Date()), jobNo:String(draft.jobNo).trim(), customer:String(draft.customer).trim(), status:draft.status,
     items, price:c.price, warranty:draft.warranty || '', payment:draft.payment, cardFee:c.cardFee, total:c.total, tip:c.tip,
     partsCost:c.partsCost, profit:c.profit, commission:c.commission, commissionPct:num(prefs.commissionPct),
+    feeBack:c.feeBack, earned:c.earned, cardFeePct:num(prefs.cardFeePct),
     review:draft.review, notes:draft.notes, description:String(draft.description || '').trim(), createdAt:draft.createdAt || now, updatedAt:now};
   const jobsCol = collection(fb.db, 'users', user.uid, 'jobs');
   const ref = draft.id ? doc(jobsCol, draft.id) : doc(jobsCol);
@@ -376,12 +384,13 @@ function rangeLabel(w){
 function weekStats(){
   const w = weekRange(weekAnchor);
   const list = jobs.filter(j => j.date >= w.s && j.date <= w.e).sort((a,b) => (a.date + (a.createdAt||'')).localeCompare(b.date + (b.createdAt||'')));
-  const st = {w, list, n:list.length, closed:0, notClosed:0, callbacks:0, revenue:0, cardFees:0, tips:0, partsCost:0, profit:0, pay:0, closedRevenue:0, reviewsGot:0, reviewsAsked:0, pays:{}, parts:{}};
+  const st = {w, list, n:list.length, closed:0, notClosed:0, callbacks:0, revenue:0, cardFees:0, feeBack:0, tips:0, partsCost:0, profit:0, pay:0, closedRevenue:0, reviewsGot:0, reviewsAsked:0, pays:{}, parts:{}};
   list.forEach(j => {
     if (j.status === 'closed'){ st.closed++; st.closedRevenue += num(j.price); }
     else if (j.status === 'not_closed') st.notClosed++; else st.callbacks++;
     st.revenue += num(j.price); st.cardFees += num(j.cardFee); st.tips += num(j.tip);
     st.partsCost += num(j.partsCost); st.profit += num(j.profit); st.pay += num(j.commission);
+    st.feeBack += num(j.feeBack);
     if (j.review === 'got'){ st.reviewsGot++; st.reviewsAsked++; } else if (j.review === 'asked') st.reviewsAsked++;
     if (num(j.total) > 0){ const p = st.pays[j.payment] || (st.pays[j.payment] = {n:0, amt:0, tip:0}); p.n++; p.amt += num(j.total); p.tip += num(j.tip); }
     if (j.status !== 'not_closed') (j.items || []).forEach(it => {
@@ -392,7 +401,7 @@ function weekStats(){
   const held = m => st.pays[m] || {n:0, amt:0, tip:0};
   st.cash = held('cash'); st.zelle = held('zelle');
   st.held = st.cash.amt + st.zelle.amt;
-  st.owed = st.pay + st.tips;
+  st.owed = r2(st.pay + st.partsCost + st.feeBack + st.tips);
   st.net = r2(st.owed - st.held);
   st.closeRate = (st.closed + st.notClosed) ? Math.round(100 * st.closed / (st.closed + st.notClosed)) : null;
   st.avgTicket = st.closed ? st.closedRevenue / st.closed : 0;
@@ -410,7 +419,7 @@ function renderWeek(){
     k('Reviews', String(st.reviewsGot), `${st.reviewsAsked} asked`) +
     k('Parts cost', money0(st.partsCost), `${Object.values(st.parts).reduce((a,p) => a + p.qty, 0)} parts used`) +
     k('Profit', money0(st.profit), 'sales − parts cost') +
-    k('My pay + tips', money(st.pay + st.tips), `${money0(st.pay)} pay · ${money0(st.tips)} tips`, true) +
+    k('I earned', money(st.owed), `${money0(st.pay)} pay · ${money0(st.partsCost + st.feeBack)} back · ${money0(st.tips)} tips`, true) +
     k('Card fees', money0(st.cardFees), `not paid yet: ${money0((st.pays.unpaid||{amt:0}).amt)}`);
   const sr = (a, b, cls = '') => `<div class="s-row ${cls}"><span>${esc(a)}</span><span>${esc(b)}</span></div>`;
   const jobsWord = n => n + (n === 1 ? ' job' : ' jobs');
@@ -418,12 +427,14 @@ function renderWeek(){
       ${sr(`Cash I collected (${jobsWord(st.cash.n)})`, money(st.cash.amt))}
       ${sr(`Zelle to me (${jobsWord(st.zelle.n)})`, money(st.zelle.amt))}
       ${sr('Money already in my hands', money(st.held), 'line')}
-      ${sr('My pay this week', money(st.pay), 'line')}
+      ${sr(`My ${num(prefs.commissionPct)}% of (jobs − parts)`, money(st.pay), 'line')}
+      ${sr('Parts paid back', money(st.partsCost))}
+      ${sr('Card fees paid back', money(st.feeBack))}
       ${sr('All my tips', money(st.tips))}
-      ${sr('What I earned (pay + tips)', money(st.owed), 'line')}
+      ${sr('What I earned', money(st.owed), 'line')}
     </div>
     <div class="s-total ${st.net >= 0 ? 'get' : 'owe'}"><span>${st.net >= 0 ? 'Company owes me' : 'I owe the company'}</span><span>${money(Math.abs(st.net))}</span></div>
-    <p class="hint">Earned minus the cash and Zelle I already have. Cash and Zelle amounts include any tips paid that way.</p>`;
+    <p class="hint">What I earned minus the cash and Zelle I already have. Cash and Zelle amounts include tips paid that way. The card fee on tips stays with the company.</p>`;
 
   const payRows = PAYMENTS.filter(([v]) => st.pays[v]).map(([v,l]) => `<tr><td>${esc(l)}</td><td class="num">${st.pays[v].n}</td><td class="num">${money(st.pays[v].amt)}</td><td class="num">${money(st.pays[v].tip)}</td></tr>`).join('');
   $('#payTbl').innerHTML = payRows ? `<table><thead><tr><th>Method</th><th class="num">Jobs</th><th class="num">Charged</th><th class="num">Tips</th></tr></thead><tbody>${payRows}</tbody></table>` : '<p class="empty">No payments logged this week.</p>';
@@ -460,7 +471,8 @@ function reportText(){
   L.push('Settle up:');
   L.push(`Cash collected: ${st.cash.n} jobs, ${money(st.cash.amt)}`);
   L.push(`Zelle to me: ${st.zelle.n} jobs, ${money(st.zelle.amt)}`);
-  L.push(`In my hands: ${money(st.held)} | Earned (pay + tips): ${money(st.owed)}`);
+  L.push(`My ${num(prefs.commissionPct)}%: ${money(st.pay)} | Parts back: ${money(st.partsCost)} | Card fees back: ${money(st.feeBack)} | Tips: ${money(st.tips)}`);
+  L.push(`Earned: ${money(st.owed)} | Already in my hands: ${money(st.held)}`);
   L.push(st.net >= 0 ? `Company owes me: ${money(st.net)}` : `I owe the company: ${money(-st.net)}`);
   L.push('');
   const pays = PAYMENTS.filter(([v]) => st.pays[v]).map(([v,l]) => `${l} ${st.pays[v].n} (${money(st.pays[v].amt)})`);

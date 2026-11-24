@@ -104,11 +104,11 @@
       <h1>My pay</h1>
       <div class="grid2">
         <label for="sPct">My commission %<input id="sPct" inputmode="decimal"></label>
-        <label for="sBase">Commission is on<select id="sBase"><option value="profit">Job price minus parts</option><option value="revenue">Full job price</option></select></label>
+        <label for="sBase">Commission is on<select id="sBase"><option value="profit">Job price minus parts (normal)</option><option value="revenue">Full job price</option></select></label>
         <label for="sCard">Card fee %<input id="sCard" inputmode="decimal"></label>
         <label for="sWeek">Week starts<select id="sWeek"><option value="1">Monday</option><option value="0">Sunday</option></select></label>
       </div>
-      <p class="hint">Profit = job price minus parts cost. Card fee and tips are left out of profit. With card, the fee is added on the job price and the tip. Your pay is saved with each job, so changing the % later won't change past weeks.</p>
+      <p class="hint">Pay = % of (job price minus parts). The company pays back the parts you bought and the card fee on the job price (not the fee on tips). Tips are all yours. Your pay is saved with each job, so changing the % later won't change past weeks.</p>
       <button id="savePay" class="primary" type="button">Save my pay settings</button>
     </div>
 

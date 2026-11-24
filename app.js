@@ -174,7 +174,7 @@ function bg(promise, failMsg){ promise.catch(e => toast((failMsg || 'Not saved')
 /* ---------- draft ---------- */
 function newDraft(){
   return {id:null, createdAt:null, date:ymd(new Date()), jobNo:'', customer:'', status:'closed', items:[],
-          price:0, warranty:'', payment:'card', tip:0, review:'none', notes:'', photos:[], newPhotos:[], removedPhotos:[]};
+          price:0, warranty:'', payment:'card', tip:0, review:'none', notes:'', description:''};
 }
 const draftKey = () => 'doorlog-draft-' + (user ? user.uid : 'x');
 function loadDraft(){ try{ const s = localStorage.getItem(draftKey()); return s ? JSON.parse(s) : null; }catch(e){ return null; } }
@@ -215,20 +215,21 @@ function seg(el, opts, val, onPick){
 }
 function payLabel(v){ return hasFee(v) ? `${label(PAYMENTS, v)} (+${num(prefs.cardFeePct)}%)` : label(PAYMENTS, v); }
 function fillForm(){
-  ['photos','newPhotos','removedPhotos','items'].forEach(k => { if (!Array.isArray(draft[k])) draft[k] = []; });
+  if (!Array.isArray(draft.items)) draft.items = [];
+  if (typeof draft.description !== 'string') draft.description = '';
   $('#formTitle').textContent = draft.id ? ('Edit job' + (draft.jobNo ? ' #' + draft.jobNo : '')) : 'New job';
   $('#fDate').value = draft.date; $('#fJobNo').value = draft.jobNo; $('#fCust').value = draft.customer;
   $('#fPrice').value = draft.price || ''; $('#fTip').value = draft.tip || ''; $('#fWarranty').value = draft.warranty || '';
-  $('#fNotes').value = draft.notes;
+  $('#fNotes').value = draft.notes; $('#fDesc').value = draft.description;
   seg($('#fStatus'), STATUSES, draft.status, v => { draft.status = v; storeDraft(); renderTotals(); });
   seg($('#fPayment'), PAYMENTS.map(([v]) => [v, payLabel(v)]), draft.payment, v => { draft.payment = v; storeDraft(); renderTotals(); });
   seg($('#fReview'), REVIEWS, draft.review, v => { draft.review = v; storeDraft(); });
   $('#deleteBtn').hidden = !draft.id; resetDelete();
   $('#saveBtn').textContent = draft.id ? 'Save changes' : 'Save job';
   $('#invoiceText').hidden = true;
-  renderPicker(); renderLines(); renderPhotos();
+  renderPicker(); renderLines();
 }
-[['#fDate','date'],['#fJobNo','jobNo'],['#fCust','customer'],['#fNotes','notes'],['#fWarranty','warranty']].forEach(([sel,key]) => {
+[['#fDate','date'],['#fJobNo','jobNo'],['#fCust','customer'],['#fNotes','notes'],['#fDesc','description'],['#fWarranty','warranty']].forEach(([sel,key]) => {
   $(sel).addEventListener('input', e => { draft[key] = e.target.value; storeDraft(); });
 });
 [['#fPrice','price'],['#fTip','tip']].forEach(([sel,key]) => {
@@ -305,63 +306,6 @@ function renderTotals(){
 }
 $('#mineBtn').addEventListener('click', () => { showMine = !showMine; try{ localStorage.setItem('doorlog-mine', showMine ? '1' : '0'); }catch(e){} renderTotals(); });
 
-/* ---------- photos (stored as compressed images in the database) ---------- */
-const photosCol = () => collection(fb.db, 'users', user.uid, 'photos');
-let photoBusy = 0;
-function renderPhotos(){
-  const grid = $('#photoGrid');
-  grid.innerHTML = draft.photos.map((id,i) => {
-    const src = photoCache.get(id);
-    return `<div class="ph${src ? '' : ' busy'}">${src ? `<img src="${src}" alt="Job photo ${i+1}">` : ''}<button type="button" class="x" data-i="${i}" aria-label="Remove photo">×</button></div>`;
-  }).join('') + Array.from({length:photoBusy}, () => '<div class="ph busy"></div>').join('');
-  draft.photos.forEach(id => { if (!photoCache.has(id)) loadPhoto(id); });
-}
-const loadingPhotos = new Set();
-async function loadPhoto(id){
-  if (loadingPhotos.has(id)) return; loadingPhotos.add(id);
-  try{ const s = await getDoc(doc(photosCol(), id)); if (s.exists()){ photoCache.set(id, s.data().data); renderPhotos(); } }
-  catch(e){} finally{ loadingPhotos.delete(id); }
-}
-function shrink(file, max = 1280){
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file); const img = new Image();
-    img.onload = () => {
-      const s = Math.min(1, max / Math.max(img.width, img.height));
-      const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-      let q = 0.72, out = c.toDataURL('image/jpeg', q);
-      while (out.length > 850000 && q > 0.3){ q -= 0.1; out = c.toDataURL('image/jpeg', q); }
-      resolve(out);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Not an image')); };
-    img.src = url;
-  });
-}
-$('#fPhotos').addEventListener('change', async e => {
-  const files = Array.from(e.target.files || []); e.target.value = '';
-  if (!files.length) return;
-  photoBusy += files.length; renderPhotos();
-  let failed = 0;
-  for (const f of files){
-    try{
-      const data = await shrink(f);
-      const ref = doc(photosCol());
-      photoCache.set(ref.id, data);
-      bg(setDoc(ref, {data, createdAt:new Date().toISOString()}), 'Photo not saved');
-      draft.photos.push(ref.id); draft.newPhotos.push(ref.id);
-    }catch(err){ failed++; }
-    photoBusy--; renderPhotos(); storeDraft();
-  }
-  toast(failed ? `${failed} photo(s) couldn’t be read.` : (files.length === 1 ? 'Photo added' : files.length + ' photos added'));
-});
-$('#photoGrid').addEventListener('click', e => {
-  const b = e.target.closest('.x'); if(!b) return;
-  const [id] = draft.photos.splice(+b.dataset.i, 1); if (!id) return;
-  if (draft.newPhotos.includes(id)){ draft.newPhotos = draft.newPhotos.filter(x => x !== id); bg(deleteDoc(doc(photosCol(), id))); }
-  else draft.removedPhotos.push(id);
-  storeDraft(); renderPhotos();
-});
-
 /* ---------- invoice / save / delete ---------- */
 function fmtDate(s){ const d = parseYmd(s); return `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; }
 function invoiceText(){
@@ -369,6 +313,8 @@ function invoiceText(){
   const L = [];
   L.push(`Garage door service – ${fmtDate(draft.date)}`);
   if (draft.jobNo) L.push(`Job #${draft.jobNo}`);
+  const desc = String(draft.description || '').trim();
+  if (desc){ L.push(''); L.push('Work done:'); L.push(desc); }
   const items = draft.items.filter(it => String(it.name).trim());
   if (items.length){ L.push(''); L.push('Parts included:'); items.forEach(it => L.push(`- ${num(it.qty) > 1 ? num(it.qty) + ' x ' : ''}${it.name}`)); }
   L.push(''); L.push(`Warranty: ${draft.warranty || 'None'}`); L.push('');
@@ -388,24 +334,21 @@ $('#invoiceBtn').addEventListener('click', () => copyText(invoiceText(), $('#inv
 
 $('#saveBtn').addEventListener('click', () => {
   if (!num(draft.price) && draft.status !== 'callback'){ toast('Enter the job price first.'); $('#fPrice').focus(); return; }
-  if (photoBusy){ toast('Wait for the photos to finish.'); return; }
   const c = calc(draft, prefs);
   const items = draft.items.filter(it => String(it.name).trim()).map(it => ({name:String(it.name).trim(), qty:num(it.qty), cost:num(it.cost)}));
   const now = new Date().toISOString();
   const data = {date:draft.date || ymd(new Date()), jobNo:String(draft.jobNo).trim(), customer:String(draft.customer).trim(), status:draft.status,
     items, price:c.price, warranty:draft.warranty || '', payment:draft.payment, cardFee:c.cardFee, total:c.total, tip:c.tip,
     partsCost:c.partsCost, profit:c.profit, commission:c.commission, commissionPct:num(prefs.commissionPct),
-    review:draft.review, notes:draft.notes, photos:draft.photos.slice(), createdAt:draft.createdAt || now, updatedAt:now};
+    review:draft.review, notes:draft.notes, description:String(draft.description || '').trim(), createdAt:draft.createdAt || now, updatedAt:now};
   const jobsCol = collection(fb.db, 'users', user.uid, 'jobs');
   const ref = draft.id ? doc(jobsCol, draft.id) : doc(jobsCol);
   bg(setDoc(ref, data), 'Job not saved');
-  (draft.removedPhotos || []).forEach(id => bg(deleteDoc(doc(photosCol(), id))));
   toast((draft.id ? 'Changes saved' : 'Job saved') + (navigator.onLine ? '' : ' on phone. It uploads when you have signal.'));
   weekAnchor = parseYmd(data.date);
   draft = newDraft(); clearStoredDraft(); fillForm(); window.scrollTo(0,0);
 });
 $('#clearBtn').addEventListener('click', () => {
-  (draft.newPhotos || []).forEach(id => bg(deleteDoc(doc(photosCol(), id))));
   draft = newDraft(); clearStoredDraft(); fillForm(); toast('Cleared');
 });
 let delArmed = false, delTimer;
@@ -414,7 +357,6 @@ $('#deleteBtn').addEventListener('click', () => {
   if (!draft.id) return;
   if (!delArmed){ delArmed = true; $('#deleteBtn').textContent = 'Tap again to delete for good'; delTimer = setTimeout(resetDelete, 4000); return; }
   bg(deleteDoc(doc(fb.db, 'users', user.uid, 'jobs', draft.id)), 'Not deleted');
-  draft.photos.concat(draft.removedPhotos).forEach(id => bg(deleteDoc(doc(photosCol(), id))));
   toast('Job deleted'); draft = newDraft(); clearStoredDraft(); fillForm();
 });
 
@@ -469,10 +411,10 @@ function renderWeek(){
   $('#payTbl').innerHTML = payRows ? `<table><thead><tr><th>Method</th><th class="num">Jobs</th><th class="num">Charged</th><th class="num">Tips</th></tr></thead><tbody>${payRows}</tbody></table>` : '<p class="empty">No payments logged this week.</p>';
   const ps = Object.entries(st.parts).sort((a,b) => b[1].qty - a[1].qty);
   $('#partsTbl').innerHTML = ps.length ? `<table><thead><tr><th>Part</th><th class="num">Qty</th><th class="num">Cost</th></tr></thead><tbody>${ps.map(([n,p]) => `<tr><td>${esc(n)}</td><td class="num">${p.qty}</td><td class="num">${money(p.cost)}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No parts used this week.</p>';
-  $('#jobList').innerHTML = st.list.length ? st.list.map(j => { const d = parseYmd(j.date); const np = (j.photos||[]).length; return `<button type="button" class="job" data-id="${esc(j.id)}">
+  $('#jobList').innerHTML = st.list.length ? st.list.map(j => { const d = parseYmd(j.date); return `<button type="button" class="job" data-id="${esc(j.id)}">
       <span class="d">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>
       <span class="m"><span><span class="pill p-${esc(j.status)}">${esc(label(STATUSES, j.status).replace(' (sold)',''))}</span>${j.jobNo ? '#' + esc(j.jobNo) : ''} ${esc(j.customer || '')}</span>
-      <small>${esc(label(PAYMENTS, j.payment))}${num(j.tip) ? ' · tip ' + esc(money0(j.tip)) : ''}${np ? ' · ' + np + ' photo' + (np > 1 ? 's' : '') : ''}${j.review === 'got' ? ' · ★ review' : j.review === 'asked' ? ' · review asked' : ''}${(j.items||[]).length ? ' · ' + esc((j.items||[]).map(i => (i.qty > 1 ? i.qty + '× ' : '') + i.name).join(', ')) : ''}</small></span>
+      <small>${esc(label(PAYMENTS, j.payment))}${num(j.tip) ? ' · tip ' + esc(money0(j.tip)) : ''}${j.review === 'got' ? ' · ★ review' : j.review === 'asked' ? ' · review asked' : ''}${(j.items||[]).length ? ' · ' + esc((j.items||[]).map(i => (i.qty > 1 ? i.qty + '× ' : '') + i.name).join(', ')) : ''}</small></span>
       <span class="num">${money0(num(j.price))}</span></button>`; }).join('')
     : '<p class="empty">No jobs logged this week. Save a job from the New job tab and it shows up here.</p>';
   $('#reportText').hidden = true;
@@ -482,7 +424,7 @@ $('#jobList').addEventListener('click', e => {
   const j = jobs.find(x => x.id === b.dataset.id); if(!j) return;
   draft = {id:j.id, createdAt:j.createdAt||null, date:j.date, jobNo:j.jobNo||'', customer:j.customer||'', status:j.status||'closed',
     items:(j.items||[]).map(i => ({...i, custom:!parts.some(p => p.name === i.name)})), price:num(j.price), warranty:j.warranty||'',
-    payment:j.payment||'card', tip:num(j.tip), review:j.review||'none', notes:j.notes||'', photos:(j.photos||[]).slice(), newPhotos:[], removedPhotos:[]};
+    payment:j.payment||'card', tip:num(j.tip), review:j.review||'none', notes:j.notes||'', description:j.description||''};
   storeDraft(); fillForm(); location.hash = 'new';
 });
 $('#prevWk').addEventListener('click', () => { weekAnchor = new Date(weekAnchor.getFullYear(), weekAnchor.getMonth(), weekAnchor.getDate() - 7); renderWeek(); });
@@ -509,9 +451,9 @@ $('#copyBtn').addEventListener('click', () => copyText(reportText(), $('#reportT
 $('#csvBtn').addEventListener('click', () => {
   const st = weekStats();
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
-  const rows = [['Date','Job #','Customer','Outcome','Parts','Warranty','Job price','Payment','Card fee','Total charged','Tip','Parts cost','Profit','My pay','Review','Notes']];
+  const rows = [['Date','Job #','Customer','Outcome','Parts','Warranty','Job price','Payment','Card fee','Total charged','Tip','Parts cost','Profit','My pay','Review','Job description','Notes']];
   st.list.forEach(j => rows.push([j.date, j.jobNo, j.customer, label(STATUSES, j.status), (j.items||[]).map(i => i.qty + 'x ' + i.name).join('; '),
-    j.warranty, j.price, label(PAYMENTS, j.payment), j.cardFee, j.total, j.tip, j.partsCost, j.profit, j.commission, label(REVIEWS, j.review), j.notes]));
+    j.warranty, j.price, label(PAYMENTS, j.payment), j.cardFee, j.total, j.tip, j.partsCost, j.profit, j.commission, label(REVIEWS, j.review), j.description, j.notes]));
   const blob = new Blob([rows.map(r => r.map(q).join(',')).join('\n')], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `jobs-${st.w.s}.csv`;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);

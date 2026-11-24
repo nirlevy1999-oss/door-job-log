@@ -21,6 +21,7 @@ const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const STATUSES = [['closed','Closed (sold)'],['not_closed','Not closed'],['callback','Callback / warranty']];
 const PAYMENTS = [['card','Card'],['zelle','Zelle'],['cash','Cash'],['unpaid','Not paid yet']];
 const REVIEWS = [['none','No'],['asked','Asked'],['got','Got a review']];
+const DEPOSITS = [['0','No'],['20','20%'],['30','30%'],['50','50%'],['other','Other $']];
 const FEE_METHODS = ['card'];
 const hasFee = p => FEE_METHODS.includes(p);
 const label = (list, v) => (list.find(x => x[0] === v) || [v, v])[1];
@@ -174,7 +175,8 @@ function bg(promise, failMsg){ promise.catch(e => toast((failMsg || 'Not saved')
 /* ---------- draft ---------- */
 function newDraft(){
   return {id:null, createdAt:null, date:ymd(new Date()), jobNo:'', customer:'', status:'closed', items:[],
-          price:0, warranty:'', payment:'card', tip:0, review:'none', notes:'', description:''};
+          price:0, warranty:'', payment:'card', tip:0, review:'none', notes:'', description:'',
+          depositPct:'0', depositAmt:0, prevDeposit:0, prevDepositDate:''};
 }
 const draftKey = () => 'doorlog-draft-' + (user ? user.uid : 'x');
 function loadDraft(){ try{ const s = localStorage.getItem(draftKey()); return s ? JSON.parse(s) : null; }catch(e){ return null; } }
@@ -182,8 +184,18 @@ let draftTimer;
 function storeDraft(){ clearTimeout(draftTimer); draftTimer = setTimeout(()=>{ try{ localStorage.setItem(draftKey(), JSON.stringify(draft)); }catch(e){} }, 400); }
 function clearStoredDraft(){ clearTimeout(draftTimer); try{ localStorage.removeItem(draftKey()); }catch(e){} }
 
+/* deposit taken today (0 = paid in full). The balance is logged later as its own job. */
+function depositOf(d){
+  const full = num(d.price), pct = String(d.depositPct || '0');
+  if (pct === '0') return 0;
+  if (pct === 'other') return Math.min(num(d.depositAmt), full);
+  return full * num(pct) / 100;
+}
 function calc(d, p){
-  const price = num(d.price);
+  const full = num(d.price);
+  const dep = depositOf(d);
+  // everything below (fee, parts, pay) is on the money collected today
+  const price = dep > 0 ? dep : full;
   const tip = num(d.tip);
   const items = d.items || [];
   const partsCost = d.status === 'not_closed' ? 0 : items.reduce((a,it) => a + num(it.qty) * num(it.cost), 0);
@@ -197,7 +209,8 @@ function calc(d, p){
   const feeBack = cardFee;
   const earned = commission + partsCost + feeBack + tip;
   return {price:r2(price), partsCost:r2(partsCost), cardFee:r2(cardFee), total:r2(total), tip:r2(tip), profit:r2(profit),
-          commission:r2(commission), feeBack:r2(feeBack), earned:r2(earned)};
+          commission:r2(commission), feeBack:r2(feeBack), earned:r2(earned),
+          full:r2(full), deposit:r2(dep), balance:r2(dep > 0 ? full - dep : 0)};
 }
 
 /* ---------- routing ---------- */
@@ -229,6 +242,10 @@ function fillForm(){
   seg($('#fStatus'), STATUSES, draft.status, v => { draft.status = v; storeDraft(); renderTotals(); });
   seg($('#fPayment'), PAYMENTS.map(([v]) => [v, payLabel(v)]), draft.payment, v => { draft.payment = v; storeDraft(); renderTotals(); });
   seg($('#fReview'), REVIEWS, draft.review, v => { draft.review = v; storeDraft(); });
+  if (draft.depositPct == null) draft.depositPct = '0';
+  seg($('#fDeposit'), DEPOSITS, String(draft.depositPct), v => { draft.depositPct = v; storeDraft(); syncDeposit(); renderTotals(); });
+  $('#fDepAmt').value = draft.depositAmt || '';
+  syncDeposit();
   $('#deleteBtn').hidden = !draft.id; resetDelete();
   $('#saveBtn').textContent = draft.id ? 'Save changes' : 'Save job';
   $('#invoiceText').hidden = true;
@@ -239,6 +256,20 @@ function fillForm(){
 });
 [['#fPrice','price'],['#fTip','tip']].forEach(([sel,key]) => {
   $(sel).addEventListener('input', e => { draft[key] = num(e.target.value); storeDraft(); renderTotals(); });
+});
+$('#fDepAmt').addEventListener('input', e => { draft.depositAmt = num(e.target.value); storeDraft(); renderTotals(); });
+function syncDeposit(){
+  $('#depAmtWrap').hidden = String(draft.depositPct) !== 'other';
+  $('#balanceBtn').hidden = !(draft.id && depositOf(draft) > 0);
+}
+$('#balanceBtn').addEventListener('click', () => {
+  const c = calc(draft, prefs);
+  const prev = draft;
+  draft = {...newDraft(), jobNo:prev.jobNo, customer:prev.customer, warranty:prev.warranty, payment:prev.payment,
+    description:prev.description, price:c.balance, prevDeposit:c.deposit, prevDepositDate:prev.date,
+    notes:`Balance of deposit job from ${fmtDate(prev.date)} (deposit ${money(c.deposit)}, full job ${money(c.full)}).`};
+  storeDraft(); fillForm(); window.scrollTo(0,0);
+  toast('New job for the balance. Add the parts you used, then save.');
 });
 $('#partSearch').addEventListener('input', e => { partFilter = e.target.value.trim().toLowerCase(); renderPicker(); });
 
@@ -294,10 +325,15 @@ $('#lines').addEventListener('input', e => {
 function renderTotals(){
   if (!draft) return;
   const c = calc(draft, prefs);
-  let html = `<div class="t-row"><span>${draft.status === 'not_closed' ? 'Charged (service call)' : 'Job price'}</span><span>${money(c.price)}</span></div>`;
+  let html = c.deposit
+    ? `<div class="t-row"><span>Full job price</span><span>${money(c.full)}</span></div>
+       <div class="t-row"><span>Deposit today${String(draft.depositPct) !== 'other' ? ' (' + esc(draft.depositPct) + '%)' : ''}</span><span>${money(c.deposit)}</span></div>`
+    : `<div class="t-row"><span>${draft.status === 'not_closed' ? 'Charged (service call)' : 'Job price'}</span><span>${money(c.price)}</span></div>`;
+  if (num(draft.prevDeposit)) html = `<div class="t-row"><span>Deposit already paid ${draft.prevDepositDate ? '(' + esc(fmtDate(draft.prevDepositDate)) + ')' : ''}</span><span>${money(num(draft.prevDeposit))}</span></div>` + html.replace('Job price', 'Balance');
   if (hasFee(draft.payment)) html += `<div class="t-row"><span>Card fee (${num(prefs.cardFeePct)}%)</span><span>${money(c.cardFee)}</span></div>`;
   if (c.tip) html += `<div class="t-row"><span>Tip</span><span>${money(c.tip)}</span></div>`;
-  html += `<div class="t-row t-big"><span>Total to charge</span><span>${money(c.total)}</span></div>`;
+  html += `<div class="t-row t-big"><span>${c.deposit ? 'Charge today' : 'Total to charge'}</span><span>${money(c.total)}</span></div>`;
+  if (c.deposit) html += `<div class="t-row"><span>Balance due later</span><span>${money(c.balance)}</span></div>`;
   $('#totals').innerHTML = html;
   $('#mine').hidden = !showMine;
   $('#mineBtn').textContent = showMine ? 'Hide my numbers' : 'Show my numbers';
@@ -326,11 +362,20 @@ function invoiceText(){
   const items = draft.items.filter(it => String(it.name).trim());
   if (items.length){ L.push(''); L.push('Parts included:'); items.forEach(it => L.push(`- ${num(it.qty) > 1 ? num(it.qty) + ' x ' : ''}${it.name}`)); }
   L.push(''); L.push(`Warranty: ${draft.warranty || 'None'}`); L.push('');
-  L.push(`Price: ${money(c.price)}`);
+  const prevDep = num(draft.prevDeposit);
+  if (c.deposit){
+    L.push(`Job price: ${money(c.full)}`);
+    L.push(`Deposit${String(draft.depositPct) !== 'other' ? ' (' + draft.depositPct + '%)' : ''}: ${money(c.deposit)}`);
+  } else if (prevDep){
+    L.push(`Job price: ${money(c.price + prevDep)}`);
+    L.push(`Deposit paid${draft.prevDepositDate ? ' (' + fmtDate(draft.prevDepositDate) + ')' : ''}: -${money(prevDep)}`);
+    L.push(`Balance: ${money(c.price)}`);
+  } else L.push(`Price: ${money(c.price)}`);
   if (hasFee(draft.payment)) L.push(`Card processing fee (${num(prefs.cardFeePct)}%): ${money(c.cardFee)}`);
   if (c.tip) L.push(`Tip: ${money(c.tip)}`);
-  L.push(`Total: ${money(c.total)}`);
+  L.push(`${c.deposit ? 'Total paid today' : 'Total'}: ${money(c.total)}`);
   if (draft.payment && draft.payment !== 'unpaid') L.push(`Paid by: ${label(PAYMENTS, draft.payment)}`);
+  if (c.deposit) L.push(`Balance due on completion: ${money(c.balance)}`);
   return L.join('\n');
 }
 function copyText(text, pre, okMsg){
@@ -349,7 +394,9 @@ $('#saveBtn').addEventListener('click', () => {
     items, price:c.price, warranty:draft.warranty || '', payment:draft.payment, cardFee:c.cardFee, total:c.total, tip:c.tip,
     partsCost:c.partsCost, profit:c.profit, commission:c.commission, commissionPct:num(prefs.commissionPct),
     feeBack:c.feeBack, earned:c.earned, cardFeePct:num(prefs.cardFeePct),
-    review:draft.review, notes:draft.notes, description:String(draft.description || '').trim(), createdAt:draft.createdAt || now, updatedAt:now};
+    review:draft.review, notes:draft.notes, description:String(draft.description || '').trim(), createdAt:draft.createdAt || now, updatedAt:now,
+    fullPrice:c.full, deposit:c.deposit, balance:c.balance, depositPct:String(draft.depositPct || '0'),
+    prevDeposit:num(draft.prevDeposit), prevDepositDate:draft.prevDepositDate || ''};
   const jobsCol = collection(fb.db, 'users', user.uid, 'jobs');
   const ref = draft.id ? doc(jobsCol, draft.id) : doc(jobsCol);
   bg(setDoc(ref, data), 'Job not saved');
@@ -385,9 +432,10 @@ function rangeLabel(w){
 function weekStats(){
   const w = weekRange(weekAnchor);
   const list = jobs.filter(j => j.date >= w.s && j.date <= w.e).sort((a,b) => (a.date + (a.createdAt||'')).localeCompare(b.date + (b.createdAt||'')));
-  const st = {w, list, n:list.length, closed:0, notClosed:0, callbacks:0, revenue:0, cardFees:0, feeBack:0, tips:0, partsCost:0, profit:0, pay:0, closedRevenue:0, reviewsGot:0, reviewsAsked:0, pays:{}, parts:{}};
+  const st = {w, list, n:list.length, closed:0, notClosed:0, callbacks:0, deposits:0, revenue:0, cardFees:0, feeBack:0, tips:0, partsCost:0, profit:0, pay:0, closedRevenue:0, reviewsGot:0, reviewsAsked:0, pays:{}, parts:{}};
   list.forEach(j => {
-    if (j.status === 'closed'){ st.closed++; st.closedRevenue += num(j.price); }
+    if (num(j.deposit) > 0) st.deposits++;
+    else if (j.status === 'closed'){ st.closed++; st.closedRevenue += num(j.price); }
     else if (j.status === 'not_closed') st.notClosed++; else st.callbacks++;
     st.revenue += num(j.price); st.cardFees += num(j.cardFee); st.tips += num(j.tip);
     st.partsCost += num(j.partsCost); st.profit += num(j.profit); st.pay += num(j.commission);
@@ -404,7 +452,8 @@ function weekStats(){
   st.held = st.cash.amt + st.zelle.amt;
   st.owed = r2(st.pay + st.partsCost + st.feeBack + st.tips);
   st.net = r2(st.owed - st.held);
-  st.closeRate = (st.closed + st.notClosed) ? Math.round(100 * st.closed / (st.closed + st.notClosed)) : null;
+  const sold = st.closed + st.deposits;
+  st.closeRate = (sold + st.notClosed) ? Math.round(100 * sold / (sold + st.notClosed)) : null;
   st.avgTicket = st.closed ? st.closedRevenue / st.closed : 0;
   return st;
 }
@@ -414,8 +463,8 @@ function renderWeek(){
   $('#wkLabel').textContent = rangeLabel(st.w);
   const k = (key, val, sub, hi) => `<div class="kpi${hi ? ' hi' : ''}"><span class="k">${esc(key)}</span><span class="v">${esc(val)}</span><span class="s">${esc(sub)}</span></div>`;
   $('#kpis').innerHTML =
-    k('Jobs', String(st.n), `${st.closed} closed · ${st.notClosed} not · ${st.callbacks} callback`) +
-    k('Close rate', st.closeRate === null ? '–' : st.closeRate + '%', 'closed ÷ (closed + not closed)') +
+    k('Jobs', String(st.n), `${st.closed} closed · ${st.deposits} deposit · ${st.notClosed} not · ${st.callbacks} callback`) +
+    k('Close rate', st.closeRate === null ? '–' : st.closeRate + '%', '(closed + deposits) ÷ all quotes') +
     k('Sales', money0(st.revenue), `avg closed job ${money0(st.avgTicket)}`) +
     k('Reviews', String(st.reviewsGot), `${st.reviewsAsked} asked`) +
     k('Parts cost', money0(st.partsCost), `${Object.values(st.parts).reduce((a,p) => a + p.qty, 0)} parts used`) +
@@ -443,8 +492,8 @@ function renderWeek(){
   $('#partsTbl').innerHTML = ps.length ? `<table><thead><tr><th>Part</th><th class="num">Qty</th><th class="num">Cost</th></tr></thead><tbody>${ps.map(([n,p]) => `<tr><td>${esc(n)}</td><td class="num">${p.qty}</td><td class="num">${money(p.cost)}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No parts used this week.</p>';
   $('#jobList').innerHTML = st.list.length ? st.list.map(j => { const d = parseYmd(j.date); return `<button type="button" class="job" data-id="${esc(j.id)}">
       <span class="d">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>
-      <span class="m"><span><span class="pill p-${esc(j.status)}">${esc(label(STATUSES, j.status).replace(' (sold)',''))}</span>${j.jobNo ? '#' + esc(j.jobNo) : ''} ${esc(j.customer || '')}</span>
-      <small>${esc(label(PAYMENTS, j.payment))}${num(j.tip) ? ' · tip ' + esc(money0(j.tip)) : ''}${j.review === 'got' ? ' · ★ review' : j.review === 'asked' ? ' · review asked' : ''}${(j.items||[]).length ? ' · ' + esc((j.items||[]).map(i => (i.qty > 1 ? i.qty + '× ' : '') + i.name).join(', ')) : ''}</small></span>
+      <span class="m"><span>${num(j.deposit) > 0 ? '<span class="pill p-deposit">Deposit</span>' : `<span class="pill p-${esc(j.status)}">${esc(label(STATUSES, j.status).replace(' (sold)',''))}</span>`}${j.jobNo ? '#' + esc(j.jobNo) : ''} ${esc(j.customer || '')}</span>
+      <small>${num(j.deposit) > 0 ? 'balance ' + esc(money0(num(j.balance))) + ' later · ' : ''}${num(j.prevDeposit) ? 'balance of deposit · ' : ''}${esc(label(PAYMENTS, j.payment))}${num(j.tip) ? ' · tip ' + esc(money0(j.tip)) : ''}${j.review === 'got' ? ' · ★ review' : j.review === 'asked' ? ' · review asked' : ''}${(j.items||[]).length ? ' · ' + esc((j.items||[]).map(i => (i.qty > 1 ? i.qty + '× ' : '') + i.name).join(', ')) : ''}</small></span>
       <span class="num">${money0(num(j.price))}</span></button>`; }).join('')
     : '<p class="empty">No jobs logged this week. Save a job from the New job tab and it shows up here.</p>';
   $('#reportText').hidden = true;
@@ -453,8 +502,9 @@ $('#jobList').addEventListener('click', e => {
   const b = e.target.closest('.job'); if(!b) return;
   const j = jobs.find(x => x.id === b.dataset.id); if(!j) return;
   draft = {id:j.id, createdAt:j.createdAt||null, date:j.date, jobNo:j.jobNo||'', customer:j.customer||'', status:j.status||'closed',
-    items:(j.items||[]).map(i => ({...i, custom:!parts.some(p => p.name === i.name)})), price:num(j.price), warranty:j.warranty||'',
-    payment:j.payment||'card', tip:num(j.tip), review:j.review||'none', notes:j.notes||'', description:j.description||''};
+    items:(j.items||[]).map(i => ({...i, custom:!parts.some(p => p.name === i.name)})), price:num(j.fullPrice != null ? j.fullPrice : j.price), warranty:j.warranty||'',
+    payment:j.payment||'card', tip:num(j.tip), review:j.review||'none', notes:j.notes||'', description:j.description||'',
+    depositPct:j.depositPct||'0', depositAmt:num(j.deposit), prevDeposit:num(j.prevDeposit), prevDepositDate:j.prevDepositDate||''};
   storeDraft(); fillForm(); location.hash = 'new';
 });
 $('#prevWk').addEventListener('click', () => { weekAnchor = new Date(weekAnchor.getFullYear(), weekAnchor.getMonth(), weekAnchor.getDate() - 7); renderWeek(); });
@@ -462,35 +512,34 @@ $('#nextWk').addEventListener('click', () => { weekAnchor = new Date(weekAnchor.
 
 function reportText(){
   const st = weekStats(); const L = [];
-  L.push(`Weekly report: ${rangeLabel(st.w)}`);
-  L.push(`Jobs: ${st.n} | Closed: ${st.closed} | Not closed: ${st.notClosed} | Callbacks: ${st.callbacks} | Close rate: ${st.closeRate === null ? '-' : st.closeRate + '%'}`);
-  L.push(`Sales: ${money(st.revenue)} | Parts cost: ${money(st.partsCost)} | Profit: ${money(st.profit)}`);
-  L.push(`Avg closed job: ${money(st.avgTicket)} | Card fees: ${money(st.cardFees)}`);
-  L.push(`My pay: ${money(st.pay)} | Tips: ${money(st.tips)}`);
-  L.push(`Reviews: ${st.reviewsGot} received (${st.reviewsAsked} asked)`);
+  const n = v => { const x = r2(v); return Number.isInteger(x) ? String(x) : x.toFixed(2); };
+  const { start:a, end:b } = st.w;
+  L.push(`Date:${a.getMonth() === b.getMonth() ? a.getDate() : a.getDate() + '/' + (a.getMonth()+1)}-${b.getDate()}/${b.getMonth()+1}`);
+  L.push(`Total price:${n(st.revenue)}`);
+  L.push(`Total parts:${n(st.partsCost)}`);
+  L.push(`Profit:${n(st.profit)}`);
   L.push('');
-  L.push('Settle up:');
-  L.push(`Cash collected: ${st.cash.n} jobs, ${money(st.cash.amt)}`);
-  L.push(`Zelle to me: ${st.zelle.n} jobs, ${money(st.zelle.amt)}`);
-  L.push(`My ${num(prefs.commissionPct)}%: ${money(st.pay)} | Parts back: ${money(st.partsCost)} | Card fees back: ${money(st.feeBack)} | Tips: ${money(st.tips)}`);
-  L.push(`Earned: ${money(st.owed)} | Already in my hands: ${money(st.held)}`);
-  L.push(st.net >= 0 ? `Company owes me: ${money(st.net)}` : `I owe the company: ${money(-st.net)}`);
+  const pay = m => st.pays[m] || {n:0, amt:0};
+  L.push(`Cc-${pay('card').n}`); L.push(`Total cc:${n(pay('card').amt)}`);
+  L.push(`Zelle-${pay('zelle').n}`); L.push(`Total Zelle:${n(pay('zelle').amt)}`);
+  L.push(`Cash-${pay('cash').n}`); L.push(`Total cash:${n(pay('cash').amt)}`);
+  if (pay('unpaid').n){ L.push(`Not paid yet-${pay('unpaid').n}`); L.push(`Total not paid:${n(pay('unpaid').amt)}`); }
   L.push('');
-  const pays = PAYMENTS.filter(([v]) => st.pays[v]).map(([v,l]) => `${l} ${st.pays[v].n} (${money(st.pays[v].amt)})`);
-  L.push(`Payments: ${pays.length ? pays.join(' | ') : 'none'}`);
-  const ps = Object.entries(st.parts).sort((a,b) => b[1].qty - a[1].qty).map(([n,p]) => `${p.qty}x ${n}`);
-  L.push(`Parts used: ${ps.length ? ps.join(', ') : 'none'}`);
-  L.push(''); L.push('Jobs:');
-  st.list.forEach(j => { const d = parseYmd(j.date);
-    L.push(`${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}  ${j.jobNo ? '#' + j.jobNo + '  ' : ''}${label(STATUSES, j.status)}  ${money(num(j.price))}  ${label(PAYMENTS, j.payment)}${num(j.tip) ? '  tip ' + money(j.tip) : ''}${j.review === 'got' ? '  review' : ''}`); });
-  return L.join('\n');
+  L.push(`Closing:${st.closed}`);
+  L.push(`Non closing:${st.notClosed}`);
+  L.push(`Deposit:${st.deposits}`);
+  L.push(`Return cx(call back):${st.callbacks}`);
+  L.push('');
+  L.push(`Review:${st.reviewsGot}`);
+  return L.join('
+');
 }
 $('#copyBtn').addEventListener('click', () => copyText(reportText(), $('#reportText'), 'Report copied. Paste it into a text or email.'));
 $('#csvBtn').addEventListener('click', () => {
   const st = weekStats();
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
-  const rows = [['Date','Job #','Customer','Outcome','Parts','Warranty','Job price','Payment','Card fee','Total charged','Tip','Parts cost','Profit','My pay','Review','Job description','Notes']];
-  st.list.forEach(j => rows.push([j.date, j.jobNo, j.customer, label(STATUSES, j.status), (j.items||[]).map(i => i.qty + 'x ' + i.name).join('; '),
+  const rows = [['Date','Job #','Customer','Outcome','Deposit','Balance later','Parts','Warranty','Job price','Payment','Card fee','Total charged','Tip','Parts cost','Profit','My pay','Review','Job description','Notes']];
+  st.list.forEach(j => rows.push([j.date, j.jobNo, j.customer, num(j.deposit) > 0 ? 'Deposit' : label(STATUSES, j.status), j.deposit || '', j.balance || '', (j.items||[]).map(i => i.qty + 'x ' + i.name).join('; '),
     j.warranty, j.price, label(PAYMENTS, j.payment), j.cardFee, j.total, j.tip, j.partsCost, j.profit, j.commission, label(REVIEWS, j.review), j.description, j.notes]));
   const blob = new Blob([rows.map(r => r.map(q).join(',')).join('\n')], {type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `jobs-${st.w.s}.csv`;

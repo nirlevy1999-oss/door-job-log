@@ -120,6 +120,7 @@ th.num,td.num{text-align:right}
 .p-closed{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
 .p-not_closed{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
 .p-callback{background:var(--chip);color:var(--muted)}
+.p-deposit{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--ink)}
 pre.report{white-space:pre-wrap;font-family:var(--f-num);font-size:.82rem;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;user-select:all;-webkit-user-select:all}
 .part-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.3fr) 96px 34px;gap:6px;align-items:center}
 .part-head{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}

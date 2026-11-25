@@ -386,7 +386,7 @@ function copyText(text, pre, okMsg){
 $('#invoiceBtn').addEventListener('click', () => copyText(invoiceText(), $('#invoiceText'), 'Invoice text copied. No part costs in it.'));
 
 $('#saveBtn').addEventListener('click', () => {
-  if (!num(draft.price) && draft.status !== 'callback'){ toast('Enter the job price first.'); $('#fPrice').focus(); return; }
+  if (!num(draft.price) && draft.status === 'closed'){ toast('Enter the job price first.'); $('#fPrice').focus(); return; }
   const c = calc(draft, prefs);
   const items = draft.items.filter(it => String(it.name).trim()).map(it => ({name:String(it.name).trim(), qty:num(it.qty), cost:num(it.cost)}));
   const now = new Date().toISOString();
